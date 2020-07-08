@@ -1,6 +1,7 @@
 apply plugin: 'com.android.application'
 apply plugin: 'kotlin-android'
 apply plugin: 'kotlin-android-extensions'
+apply plugin: 'com.google.gms.google-services'
 
 android {
     compileSdkVersion 29
@@ -55,4 +56,8 @@ dependencies {
     // CameraX View class
     implementation 'androidx.camera:camera-view:1.0.0-alpha10'
     implementation 'androidx.fragment:fragment:1.2.4'
+
+    // ML Kit
+    //implementation 'com.google.firebase:firebase-ml-vision:24.0.3'
+    implementation 'com.google.android.gms:play-services-mlkit-text-recognition:16.1.0'
 }
