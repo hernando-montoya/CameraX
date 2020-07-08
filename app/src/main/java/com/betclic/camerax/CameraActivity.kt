@@ -2,6 +2,8 @@ package com.betclic.camerax
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Bundle
@@ -16,7 +18,7 @@ import androidx.core.content.ContextCompat
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.Text
 import com.google.mlkit.vision.text.TextRecognition
-import kotlinx.android.synthetic.main.activity_main.*
+import kotlinx.android.synthetic.main.activity_camera.*
 import java.io.File
 import java.nio.ByteBuffer
 import java.text.SimpleDateFormat
@@ -25,10 +27,23 @@ import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
 typealias LumaListener = (luma: Double) -> Unit
-typealias IbanListener = (ibanImage: InputImage, proxyImage: ImageProxy) -> Unit
-//typealias IbanFirebaseListener = (ibanFirebaseImage: FirebaseVisionImage) -> Unit
 
-class MainActivity : AppCompatActivity() {
+class CameraActivity : AppCompatActivity() {
+
+    companion object {
+        private const val TAG = "CameraXBasic"
+        private const val FILENAME_FORMAT = "yyyy-MM-dd-HH-mm-ss-SSS"
+        private const val REQUEST_CODE_PERMISSIONS = 10
+        private val REQUIRED_PERMISSIONS = arrayOf(Manifest.permission.CAMERA)
+        const val IBAN_PREFIX_FRANCE = "FR"
+        val IBAN_PATTERN_FR = "^${IBAN_PREFIX_FRANCE}\\d{12}[0-9A-Z]{11}\\d{2}\$".toRegex()
+
+        fun newIntent(context: Context) =
+            Intent(context, CameraActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+    }
+
     var captureType = CaptureType.IBAN
     private var preview: Preview? = null
     private var imageCapture: ImageCapture? = null
@@ -42,7 +57,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
+        setContentView(R.layout.activity_camera)
 
         // Request camera permissions
         if (allPermissionsGranted()) {
@@ -124,27 +139,12 @@ class MainActivity : AppCompatActivity() {
 
             imageAnalyzer = ImageAnalysis.Builder()
                 .setImageQueueDepth(1)
-                //.setTargetResolution(Size(1280, 720))
                 .setTargetAspectRatio(AspectRatio.RATIO_16_9)
-                //.setBackpressureStrategy(ImageAnalysis.STRATEGY_BLOCK_PRODUCER)
                 .build()
                 .also {
                     it.setAnalyzer(cameraExecutor, ImageAnalysis.Analyzer { image: ImageProxy ->
                         runTextRecognitionFromImageProxy(image)
-                        Log.d(TAG, "image${image.imageInfo}")
                     })
-
-
-//                    it.setAnalyzer(cameraExecutor, IbanAnalyzer { ibanImage, proxy ->
-//                        runTextRecognitionFromImage(ibanImage, proxy)
-//
-//                        Log.d(TAG, "image${ibanImage.format}")
-//
-//                    })
-//                    it.setAnalyzer(cameraExecutor, IbanFirebaseAnalyzer { ibanImage ->
-//                        runTextRecognitionFromFirebaseImage(ibanImage)
-//                        //Log.d(TAG, "image${ibanImage.format}")
-//                    })
                 }
 
             // Select back camera
@@ -218,17 +218,6 @@ class MainActivity : AppCompatActivity() {
             }
     }
 
-//    private fun runTextRecognitionFromFirebaseImage(image: FirebaseVisionImage) {
-//        val detector = FirebaseVision.getInstance().onDeviceTextRecognizer
-//
-//        detector.processImage(image)
-//            .addOnSuccessListener { processFirebaseResults(it) }
-//            .addOnFailureListener {
-//                Toast.makeText(baseContext, "Error detecting Text $it", Toast.LENGTH_LONG)
-//                    .show()
-//            }
-//    }
-
     @SuppressLint("UnsafeExperimentalUsageError")
     private fun runTextRecognitionFromImageProxy(proxyImage: ImageProxy) {
         val recognizer = TextRecognition.getClient()
@@ -248,41 +237,10 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-
-    private fun runTextRecognitionFromImage(image: InputImage, proxyImage: ImageProxy) {
-        val recognizer = TextRecognition.getClient()
-        recognizer.process(image)
-            .addOnSuccessListener { processResults(it) }
-            .addOnFailureListener {
-                Toast.makeText(baseContext, "Error detecting Text $it", Toast.LENGTH_LONG)
-                    .show()
-            }
-            .addOnCompleteListener { proxyImage.close() }
-    }
-
-//    private fun processFirebaseResults(text: FirebaseVisionText) {
-//        if (text.textBlocks.isNullOrEmpty()) {
-//            Toast.makeText(
-//                baseContext,
-//                "No Text detected, Please try again",
-//                Toast.LENGTH_LONG
-//            ).show()
-//        }
-//
-//        text.textBlocks.forEach { textBlock ->
-//            textBlock.lines.forEach { line ->
-//                checkIfIbanPresent(line.text)
-//            }
-//        }
-//    }
-
     private fun processResults(text: Text) {
         if (text.textBlocks.isNullOrEmpty()) {
-            Toast.makeText(
-                baseContext,
-                "No Text detected, Please try again",
-                Toast.LENGTH_LONG
-            ).show()
+            camera_infos_title.text = "Iban recognizer"
+            camera_infos_description.text = "No text detected, Please try again"
         }
 
         text.textBlocks.forEach { textBlock ->
@@ -297,13 +255,14 @@ class MainActivity : AppCompatActivity() {
 
         val ibanResult = "$IBAN_PREFIX_FRANCE${text.substringAfter(IBAN_PREFIX_FRANCE)}"
         if (ibanResult.replace("\\s".toRegex(), "").matches(IBAN_PATTERN_FR)) {
+            camera_infos_description.text = "Iban detected"
             Log.i("IBAN", "iban detected")
-            // retrieve result and send it to consumer
-            Toast.makeText(
-                baseContext,
-                "IBAN correctly detected ;)",
-                Toast.LENGTH_LONG
-            ).show()
+            baseContext.startActivity(
+                ResultActivity.newIntent(
+                    baseContext,
+                    ibanResult
+                )
+            )
         }
     }
 
@@ -319,16 +278,6 @@ class MainActivity : AppCompatActivity() {
         }
         return if (mediaDir != null && mediaDir.exists())
             mediaDir else filesDir
-    }
-
-    companion object {
-        private const val TAG = "CameraXBasic"
-        private const val FILENAME_FORMAT = "yyyy-MM-dd-HH-mm-ss-SSS"
-        private const val REQUEST_CODE_PERMISSIONS = 10
-        private val REQUIRED_PERMISSIONS = arrayOf(Manifest.permission.CAMERA)
-        const val IBAN_PREFIX_FRANCE = "FR"
-        val IBAN_PATTERN_FR = "^${IBAN_PREFIX_FRANCE}\\d{12}[0-9A-Z]{11}\\d{2}\$".toRegex()
-
     }
 
     private class LuminosityAnalyzer(private val listener: LumaListener) : ImageAnalysis.Analyzer {
@@ -350,36 +299,6 @@ class MainActivity : AppCompatActivity() {
             listener(luma)
 
             image.close()
-        }
-    }
-
-//    private class IbanFirebaseAnalyzer(private val listener: IbanFirebaseListener) :
-//        ImageAnalysis.Analyzer {
-//        @SuppressLint("UnsafeExperimentalUsageError")
-//        override fun analyze(proxyImage: ImageProxy) {
-//            val mediaImage = proxyImage.image
-//            mediaImage?.let { img ->
-//                val firebaseVisionImage =
-//                    FirebaseVisionImage.fromMediaImage(img, proxyImage.imageInfo.rotationDegrees)
-//
-//                listener(firebaseVisionImage)
-//            }
-//
-//            proxyImage.close()
-//        }
-//    }
-
-    private class IbanAnalyzer(private val listener: IbanListener) : ImageAnalysis.Analyzer {
-        @SuppressLint("UnsafeExperimentalUsageError")
-        override fun analyze(proxyImage: ImageProxy) {
-            val mediaImage = proxyImage.image
-            mediaImage?.let { img ->
-                val image =
-                    InputImage.fromMediaImage(img, proxyImage.imageInfo.rotationDegrees)
-
-                listener(image, proxyImage)
-            }
-            //proxyImage.close()
         }
     }
 }
