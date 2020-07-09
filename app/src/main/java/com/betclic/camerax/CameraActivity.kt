@@ -8,7 +8,6 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Bundle
 import android.util.Log
-import android.view.MotionEvent
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.camera.core.*
@@ -20,13 +19,10 @@ import com.google.mlkit.vision.text.Text
 import com.google.mlkit.vision.text.TextRecognition
 import kotlinx.android.synthetic.main.activity_camera.*
 import java.io.File
-import java.nio.ByteBuffer
 import java.text.SimpleDateFormat
 import java.util.*
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
-
-typealias LumaListener = (luma: Double) -> Unit
 
 class CameraActivity : AppCompatActivity() {
 
@@ -51,6 +47,7 @@ class CameraActivity : AppCompatActivity() {
     private var camera: Camera? = null
     private var cameraSelector: CameraSelector? = null
     private var flashMode = ImageCapture.FLASH_MODE_OFF
+    private var lensFacing = CameraSelector.LENS_FACING_BACK
 
     private lateinit var outputDirectory: File
     private lateinit var cameraExecutor: ExecutorService
@@ -84,18 +81,9 @@ class CameraActivity : AppCompatActivity() {
                 .build()
         }
 
+        camera_back_button.setOnClickListener { onBackPressed() }
 
-        viewFinder.setOnTouchListener { _, event ->
-            if (event.action != MotionEvent.ACTION_UP) {
-                return@setOnTouchListener false
-            }
-
-            val factory = viewFinder.createMeteringPointFactory(cameraSelector!!)
-            val point = factory.createPoint(event.x, event.y)
-            val action = FocusMeteringAction.Builder(point).build()
-            camera?.cameraControl?.startFocusAndMetering(action)
-            return@setOnTouchListener true
-        }
+        camera_switch_button.setOnClickListener { toggleCamera() }
 
         outputDirectory = getOutputDirectory()
 
@@ -143,13 +131,16 @@ class CameraActivity : AppCompatActivity() {
                 .build()
                 .also {
                     it.setAnalyzer(cameraExecutor, ImageAnalysis.Analyzer { image: ImageProxy ->
+                        graphic_overlay.setCameraInfo(image.width, image.height, 1)
                         runTextRecognitionFromImageProxy(image)
                     })
                 }
 
-            // Select back camera
+            // Select lens camera
             cameraSelector =
-                CameraSelector.Builder().requireLensFacing(CameraSelector.LENS_FACING_BACK).build()
+                CameraSelector.Builder()
+                    .requireLensFacing(lensFacing)
+                    .build()
 
             try {
                 // Unbind use cases before rebinding
@@ -159,12 +150,21 @@ class CameraActivity : AppCompatActivity() {
                 camera = cameraProvider.bindToLifecycle(
                     this, cameraSelector!!, preview, imageCapture, imageAnalyzer
                 )
-                preview?.setSurfaceProvider(viewFinder.createSurfaceProvider(camera?.cameraInfo))
+                preview?.setSurfaceProvider(viewFinder.createSurfaceProvider())
             } catch (exc: Exception) {
                 Log.e(TAG, "Use case binding failed", exc)
             }
 
         }, ContextCompat.getMainExecutor(this))
+    }
+
+    private fun toggleCamera() {
+        lensFacing = if (lensFacing == CameraSelector.LENS_FACING_BACK) {
+            CameraSelector.LENS_FACING_FRONT
+        } else {
+            CameraSelector.LENS_FACING_BACK
+        }
+        startCamera()
     }
 
     private fun takePhoto() {
@@ -239,24 +239,35 @@ class CameraActivity : AppCompatActivity() {
 
     private fun processResults(text: Text) {
         if (text.textBlocks.isNullOrEmpty()) {
-            camera_infos_title.text = "Iban recognizer"
-            camera_infos_description.text = "No text detected, Please try again"
+            camera_infos_title.text = resources.getString(R.string.app_name)
+            camera_infos_description.text = "No iban detected, please try again!"
         }
 
         text.textBlocks.forEach { textBlock ->
             textBlock.lines.forEach { line ->
-                checkIfIbanPresent(line.text)
+                checkIfIbanPresent(line)
             }
         }
     }
 
-    private fun checkIfIbanPresent(text: String) {
+    private fun checkIfIbanPresent(line: Text.Line) {
+        val text = line.text
         Log.i("IBAN", text.substringAfter("FR"))
 
         val ibanResult = "$IBAN_PREFIX_FRANCE${text.substringAfter(IBAN_PREFIX_FRANCE)}"
         if (ibanResult.replace("\\s".toRegex(), "").matches(IBAN_PATTERN_FR)) {
             camera_infos_description.text = "Iban detected"
             Log.i("IBAN", "iban detected")
+
+            // draw box
+//            graphic_overlay.clear()
+//            line.elements.indices.forEach { index ->
+//                val textGraphic: GraphicOverlay.Graphic =
+//                    TextGraphic(graphic_overlay, line.elements[index])
+//                graphic_overlay.add(textGraphic)
+//            }
+
+            // Send result
             baseContext.startActivity(
                 ResultActivity.newIntent(
                     baseContext,
@@ -272,33 +283,11 @@ class CameraActivity : AppCompatActivity() {
         ) == PackageManager.PERMISSION_GRANTED
     }
 
-    fun getOutputDirectory(): File {
+    private fun getOutputDirectory(): File {
         val mediaDir = externalMediaDirs.firstOrNull()?.let {
             File(it, resources.getString(R.string.app_name)).apply { mkdirs() }
         }
         return if (mediaDir != null && mediaDir.exists())
             mediaDir else filesDir
-    }
-
-    private class LuminosityAnalyzer(private val listener: LumaListener) : ImageAnalysis.Analyzer {
-
-        private fun ByteBuffer.toByteArray(): ByteArray {
-            rewind()    // Rewind the buffer to zero
-            val data = ByteArray(remaining())
-            get(data)   // Copy the buffer into a byte array
-            return data // Return the byte array
-        }
-
-        override fun analyze(image: ImageProxy) {
-
-            val buffer = image.planes[0].buffer
-            val data = buffer.toByteArray()
-            val pixels = data.map { it.toInt() and 0xFF }
-            val luma = pixels.average()
-
-            listener(luma)
-
-            image.close()
-        }
     }
 }
