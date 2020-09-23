@@ -5,4 +5,22 @@
     <color name="colorAccent">#666666</color>
     <color name="backgroundPage">#e8e9eb</color>
     <color name="cherryRed">#e10014</color>
+
+
+    <color name="whiteAlpha20">#33FFFFFF</color> <!-- 20% white opacity --> <!-- Mask for disable state of live button -->
+    <color name="whiteAlpha50">#80FFFFFF</color> <!-- 50% white opacity --> <!-- Mask for disable state of primary button -->
+    <color name="whiteAlpha60">#9AFFFFFF</color> <!-- 60% white opacity --> <!-- Mask for disable state of live button text -->
+    <color name="whiteAlpha70">#B3FFFFFF</color> <!-- 70% white opacity -->
+    <color name="greyLightAlpha30">#4DC9CBCB</color> <!-- 30% greyLight opacity -->
+    <color name="greyDarkAlpha50">#80292929</color> <!-- 50% greyDark opacity -->
+    <color name="blackAlpha30">#4D111111</color> <!-- 30% black opacity -->
+    <color name="blackAlpha50">#80111111</color> <!-- 50% black opacity --> <!-- Mask for disable state of tertiary button -->
+    <color name="blackAlpha80">#CC111111</color> <!-- 80% black opacity -->
+    <color name="blackAlpha90">#E6111111</color> <!-- 90% black opacity -->
+    <color name="magmaAlpha50">#80E10014</color> <!-- 50% magma opacity --> <!-- Mask for disable state of alternative primary button -->
+    <color name="magmaAlpha40">#66E10014</color> <!-- 40% magma opacity --> <!-- Mask for disable state of alternative primary button -->
+    <color name="magmaAlpha20">#33E10014</color> <!-- 20% magma opacity --> <!-- Mask for disable state of alternative primary button -->
+
+
+    <color name="notFoundBackground">#DD222222</color>
 </resources>

@@ -34,13 +34,23 @@ class ResultActivity : AppCompatActivity() {
                 if (event.x >= (iban_text_value.right - iban_text_value.compoundDrawables[DRAWABLE_RIGHT].bounds.width())) {
                     applicationContext.startActivity(
                         CameraActivity.newIntent(
-                            applicationContext
+                            applicationContext,
+                            CaptureType.IBAN
                         )
                     )
                     true
                 }
             }
             false
+        }
+
+        document_ocr_button.setOnClickListener {
+            applicationContext.startActivity(
+                CameraActivity.newIntent(
+                    applicationContext,
+                    CaptureType.DOCUMENT
+                )
+            )
         }
 
 

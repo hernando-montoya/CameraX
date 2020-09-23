@@ -5,15 +5,21 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.Rect
+import android.graphics.RectF
 import android.net.Uri
 import android.os.Bundle
 import android.util.Log
+import android.util.Rational
+import android.view.View
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.camera.core.*
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.core.net.toFile
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.Text
 import com.google.mlkit.vision.text.TextRecognition
@@ -27,20 +33,26 @@ import java.util.concurrent.Executors
 class CameraActivity : AppCompatActivity() {
 
     companion object {
+        const val CAPTURE_TYPE = "CAPTURE_TYPE"
         private const val TAG = "CameraXBasic"
         private const val FILENAME_FORMAT = "yyyy-MM-dd-HH-mm-ss-SSS"
         private const val REQUEST_CODE_PERMISSIONS = 10
         private val REQUIRED_PERMISSIONS = arrayOf(Manifest.permission.CAMERA)
         const val IBAN_PREFIX_FRANCE = "FR"
         val IBAN_PATTERN_FR = "^${IBAN_PREFIX_FRANCE}\\d{12}[0-9A-Z]{11}\\d{2}\$".toRegex()
+        val PASSPORT_PATTERN =
+            "P<(\\w{3})([A-Z]+)(<([A-Z]+))?<<([A-Z]+)".toRegex()
 
-        fun newIntent(context: Context) =
+        val ID_PATTERN =
+            "([A-Z]{1})([A-Z]{1})([A-Z]{3})([A-Z<]{25})([A-Z0-9<]{3})([0-9<]{3})".toRegex()
+
+        fun newIntent(context: Context, captureType: CaptureType) =
             Intent(context, CameraActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                putExtra(CAPTURE_TYPE, captureType)
             }
     }
 
-    var captureType = CaptureType.IBAN
     private var preview: Preview? = null
     private var imageCapture: ImageCapture? = null
     private var imageAnalyzer: ImageAnalysis? = null
@@ -51,6 +63,11 @@ class CameraActivity : AppCompatActivity() {
 
     private lateinit var outputDirectory: File
     private lateinit var cameraExecutor: ExecutorService
+    lateinit var overlay: Bitmap
+
+    lateinit var viewFinderRect: Rect
+
+    private val captureType: CaptureType by lazy { intent.getSerializableExtra(CAPTURE_TYPE) as CaptureType }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -85,9 +102,24 @@ class CameraActivity : AppCompatActivity() {
 
         camera_switch_button.setOnClickListener { toggleCamera() }
 
+        if (captureType == CaptureType.IBAN) {
+            camera_infos_title.text = resources.getString(R.string.app_name)
+        } else {
+            camera_infos_title.text = "Documents recognizer"
+        }
         outputDirectory = getOutputDirectory()
 
         cameraExecutor = Executors.newSingleThreadExecutor()
+
+        viewFinder.post {
+            viewFinderRect = Rect(
+                viewFinderWindow.left + 10,
+                viewFinderWindow.top + 10,
+                viewFinderWindow.right - 10,
+                viewFinderWindow.bottom - 10
+            )
+            view_finder_background.setViewFinderRect(viewFinderRect)
+        }
     }
 
     override fun onRequestPermissionsResult(
@@ -131,7 +163,13 @@ class CameraActivity : AppCompatActivity() {
                 .build()
                 .also {
                     it.setAnalyzer(cameraExecutor, ImageAnalysis.Analyzer { image: ImageProxy ->
-                        graphic_overlay.setCameraInfo(image.width, image.height, 1)
+//                        val bitmap = viewFinder.bitmap ?: return@Analyzer
+//                        overlay = Bitmap.createBitmap(
+//                            bitmap.width,
+//                            bitmap.height,
+//                            Bitmap.Config.ARGB_8888
+//                        )
+                        image.setCropRect(viewFinderRect)
                         runTextRecognitionFromImageProxy(image)
                     })
                 }
@@ -180,8 +218,13 @@ class CameraActivity : AppCompatActivity() {
         )
 
         // Create output options object which contains file + metadata
-        val outputOptions = ImageCapture.OutputFileOptions.Builder(photoFile).build()
+        val outputOptions =
+            ImageCapture
+                .OutputFileOptions
+                .Builder(photoFile)
+                .build()
 
+        imageCapture.setCropAspectRatio(Rational(200, 126))
         // Setup image capture listener which is triggered after photo has
         // been taken
         imageCapture.takePicture(
@@ -198,11 +241,13 @@ class CameraActivity : AppCompatActivity() {
                     Toast.makeText(baseContext, msg, Toast.LENGTH_SHORT).show()
                     Log.d(TAG, msg)
 
-                    when (captureType) {
-                        CaptureType.IBAN -> runTextRecognitionFromUri(savedUri)
-                        CaptureType.DOCUMENT -> TODO()
-                    }
-
+                    // show preview photo
+                    baseContext.startActivity(
+                        CameraPreviewActivity.newIntent(
+                            baseContext,
+                            savedUri.toFile().absolutePath
+                        )
+                    )
                 }
             })
     }
@@ -223,12 +268,51 @@ class CameraActivity : AppCompatActivity() {
         val recognizer = TextRecognition.getClient()
 
         val mediaImage = proxyImage.image
+        val rotation = proxyImage.imageInfo.rotationDegrees
         mediaImage?.let { img ->
             val image =
-                InputImage.fromMediaImage(img, proxyImage.imageInfo.rotationDegrees)
+                InputImage.fromMediaImage(img, rotation)
 
             recognizer.process(image)
-                .addOnSuccessListener { processResults(it) }
+                .addOnSuccessListener { text ->
+                    val reverseDimens = rotation == 90 || rotation == 270
+                    val width = if (reverseDimens) proxyImage.height else proxyImage.width
+                    val height = if (reverseDimens) proxyImage.width else proxyImage.height
+
+                    val rectBounds = text.textBlocks.map { block ->
+                        block.boundingBox?.transform(width, height)
+                    }
+
+                    // graphic_overlay.post { graphic_overlay.drawRectBounds(rectBounds as List<RectF>) }
+
+//                    val linesPaint = Paint().apply {
+//                        style = Paint.Style.FILL_AND_STROKE
+//                        color = ContextCompat.getColor(applicationContext, R.color.whiteAlpha20)
+//                        strokeWidth = 10f
+//                    }
+//                    val blocks = text.textBlocks
+//                    val blocksRect = blocks.mapNotNull { it.boundingBox }
+//
+//                    val lines = blocks.flatMap { it.lines }
+//                    val linesRect = lines.mapNotNull { it.boundingBox }
+//
+//                    val elements = lines.flatMap { it.elements }
+//                    val elementsRect = elements.mapNotNull { it.boundingBox }
+//
+//                    // copy bitmap and make it mutable if necessary (optional step)
+//                    // depends on how do you get your bitmap
+//                    val mutableBitmap = overlay.copy(overlay.config, true)
+//
+//                    // draw all bounding boxes on bitmap
+//                    with(Canvas(mutableBitmap)) {
+//                        //blocksRect.forEach { drawRect(it, blocksPaint) }
+//                        linesRect.forEach { drawRect(it, linesPaint) }
+//                        //elementsRect.forEach { drawRect(it, elementsPaint) }
+//                    }
+//                    graphic_overlay.setImageBitmap(mutableBitmap)
+
+                    processResults(text)
+                }
                 .addOnFailureListener {
                     Toast.makeText(baseContext, "Error detecting Text $it", Toast.LENGTH_LONG)
                         .show()
@@ -239,15 +323,50 @@ class CameraActivity : AppCompatActivity() {
 
     private fun processResults(text: Text) {
         if (text.textBlocks.isNullOrEmpty()) {
-            camera_infos_title.text = resources.getString(R.string.app_name)
-            camera_infos_description.text = "No iban detected, please try again!"
+            if (captureType == CaptureType.IBAN) {
+                camera_infos_description.text = "No iban detected, please try again!"
+            } else {
+                camera_infos_description.text = "No document detected, please try again!"
+                camera_capture_button.visibility = View.INVISIBLE
+            }
         }
 
         text.textBlocks.forEach { textBlock ->
             textBlock.lines.forEach { line ->
-                checkIfIbanPresent(line)
+                Log.i("MRZ", line.text)
+                if (captureType == CaptureType.IBAN) {
+                    checkIfIbanPresent(line)
+                } else {
+                    checkIfIdCardPresent(line)
+                }
             }
         }
+    }
+
+    private fun checkIfIdCardPresent(line: Text.Line) {
+        if (line.text.matches(ID_PATTERN)) {
+            camera_capture_button.visibility = View.VISIBLE
+            camera_infos_description.text = "ID card detected"
+            Log.i("MRZ", "id detected")
+        }
+    }
+
+    private fun Rect.transform(width: Int, height: Int): RectF {
+        val scaleX = viewFinder.width / width.toFloat()
+        val scaleY = viewFinder.height / height.toFloat()
+
+        // If the front camera lens is being used, reverse the right/left coordinates
+        val flippedLeft =
+            if (lensFacing == CameraSelector.LENS_FACING_FRONT) width - right else left
+        val flippedRight =
+            if (lensFacing == CameraSelector.LENS_FACING_FRONT) width - left else right
+
+        // Scale all coordinates to match preview
+        val scaledLeft = scaleX * flippedLeft
+        val scaledTop = scaleY * top
+        val scaledRight = scaleX * flippedRight
+        val scaledBottom = scaleY * bottom
+        return RectF(scaledLeft, scaledTop, scaledRight, scaledBottom)
     }
 
     private fun checkIfIbanPresent(line: Text.Line) {
